@@ -26,6 +26,7 @@ FB = ("Helvetica", 10, "bold")
 FM = ("Courier", 9)
 FN = ("Helvetica", 8)
 FX = ("Helvetica", 18, "bold")
+FW = ("Helvetica", 9, "bold")  # Para pesos en aristas
 
 
 class App(tk.Tk):
@@ -39,6 +40,7 @@ class App(tk.Tk):
         self.grafo = None
         self.n_var    = tk.StringVar(value="3")
         self.tipo_var = tk.StringVar(value="Dirigido")
+        self.algoritmo_var = tk.StringVar(value="Dijkstra")  # NUEVO
         self.botones_matriz = []
         self.camino_nodos   = []
         self.ciclo_nodos    = []
@@ -67,21 +69,30 @@ class App(tk.Tk):
 
         tk.Label(p, text="PASO 1 - CONFIGURAR EL GRAFO",
                  bg=PANEL, fg=SUAVE, font=FN).grid(row=0, column=0,
-                 columnspan=6, sticky="w", pady=(0, 8))
+                 columnspan=8, sticky="w", pady=(0, 8))
 
+        # Tamaño
         tk.Label(p, text="Tamano n x n:", bg=PANEL,
                  fg=TEXTO, font=FL).grid(row=1, column=0, padx=(0, 4))
         tk.Entry(p, textvariable=self.n_var, width=4,
                  font=FL, bd=1, relief="solid").grid(row=1, column=1, padx=(0, 14))
 
+        # Tipo de grafo
         tk.Label(p, text="Tipo:", bg=PANEL,
                  fg=TEXTO, font=FL).grid(row=1, column=2, padx=(0, 4))
         ttk.Combobox(p, textvariable=self.tipo_var, width=16,
                      values=["Dirigido", "No dirigido"],
                      state="readonly", font=FL).grid(row=1, column=3, padx=(0, 18))
 
-        self._boton(p, "Crear matriz", self._crear).grid(row=1, column=4, padx=(0, 6))
-        self._boton(p, "Limpiar", self._reset, sec=True).grid(row=1, column=5)
+        # NUEVO: Selector de algoritmo
+        tk.Label(p, text="Algoritmo:", bg=PANEL,
+                 fg=TEXTO, font=FL).grid(row=1, column=4, padx=(0, 4))
+        ttk.Combobox(p, textvariable=self.algoritmo_var, width=16,
+                     values=["Dijkstra", "Bellman-Ford"],
+                     state="readonly", font=FL).grid(row=1, column=5, padx=(0, 18))
+
+        self._boton(p, "Crear matriz", self._crear).grid(row=1, column=6, padx=(0, 6))
+        self._boton(p, "Limpiar", self._reset, sec=True).grid(row=1, column=7)
 
     # ------------------------------------------------------------------
     def _crear(self):
@@ -245,19 +256,35 @@ class App(tk.Tk):
         if self.grafo.matriz[i][j] == 0:
             # Si no existe, primero activarla con peso 1
             self.grafo.agregar_arista(i, j, 1)
+        
         actual = self.grafo.matriz[i][j]
+        algo = self.algoritmo_var.get()
+        
+        # Mensaje según algoritmo seleccionado
+        if algo == "Dijkstra":
+            msj = f"Peso de la arista v{i+1} → v{j+1}\n(Solo positivos para Dijkstra)\n(0 = eliminar):"
+        else:
+            msj = f"Peso de la arista v{i+1} → v{j+1}\n(Bellman-Ford acepta negativos)\n(0 = eliminar):"
+        
         nuevo = simpledialog.askfloat(
             "Editar peso",
-            f"Peso de la arista v{i+1} → v{j+1}\n(0 = eliminar arista):",
+            msj,
             initialvalue=actual,
             parent=self
         )
         if nuevo is None:
             return  # cancelado
+        
+        # Validación según algoritmo
+        if algo == "Dijkstra" and nuevo < 0 and nuevo != 0:
+            self._dlg_error("⚠️ Dijkstra requiere pesos positivos.\nUsa Bellman-Ford para pesos negativos.")
+            return
+        
         if nuevo == 0:
             self.grafo.eliminar_arista(i, j)
         else:
             self.grafo.set_peso(i, j, nuevo)
+        
         self._estilo(self.botones_matriz[i][j], i, j)
         if not self.grafo.dirigido and i != j:
             self._estilo(self.botones_matriz[j][i], j, i)
@@ -279,6 +306,7 @@ class App(tk.Tk):
 
     # ------------------------------------------------------------------
     def _draw(self):
+        """MEJORADO: Dibuja el grafo con pesos visibles"""
         if not self.grafo or not hasattr(self, "cv"):
             return
         cv = self.cv
@@ -317,42 +345,66 @@ class App(tk.Tk):
             if (ni, nj) in cam_set:  return AMARILLO, 2.5
             return ACENTO, 1.5
 
+        # Dibujar aristas primero
         for i in range(n):
             for j in range(n):
                 if not g.matriz[i][j]: continue
+                
                 # Lazos (self-loop)
                 if i == j:
                     x, y = pos[i]
                     col, lw = ecol_width(i, j)
+                    # Dibujar el círculo del lazo
                     cv.create_oval(x+R-4, y-R-20, x+R+20, y-R+4,
                                    outline=col, width=lw)
-                    # peso del lazo
+                    # Peso del lazo con fondo blanco
                     w_val = g.matriz[i][j]
+                    peso_txt = str(int(w_val) if w_val == int(w_val) else w_val)
+                    cv.create_rectangle(x+R+8, y-R-17, x+R+20, y-R-3,
+                                       fill="white", outline=col, width=1)
                     cv.create_text(x+R+14, y-R-10,
-                                   text=str(w_val), fill=col, font=FN)
+                                   text=peso_txt, fill=col, font=FW)
                     continue
-                if not g.dirigido and j < i: continue
+                
+                if not g.dirigido and j < i: 
+                    continue
+                
                 x1, y1 = pos[i]; x2, y2 = pos[j]
                 ang = math.atan2(y2-y1, x2-x1)
                 sx = x1 + R*math.cos(ang); sy = y1 + R*math.sin(ang)
                 ex = x2 - R*math.cos(ang); ey = y2 - R*math.sin(ang)
                 col, lw = ecol_width(i, j)
+                
+                # Desplazar aristas bidireccionales
                 if g.dirigido and g.matriz[j][i]:
                     px = -math.sin(ang)*OFF; py = math.cos(ang)*OFF
                     sx+=px; sy+=py; ex+=px; ey+=py
+                
+                # Dibujar arista
                 if g.dirigido:
                     cv.create_line(sx, sy, ex, ey, fill=col, width=lw,
                                    arrow=tk.LAST, arrowshape=(10, 12, 4))
                 else:
                     cv.create_line(sx, sy, ex, ey, fill=col, width=lw)
-                # Mostrar peso en el centro de la arista
-                mx = (sx + ex) / 2 + (-math.sin(ang)*10 if g.dirigido and g.matriz[j][i] else 0)
-                my = (sy + ey) / 2 + (math.cos(ang)*10 if g.dirigido and g.matriz[j][i] else 0)
+                
+                # Mostrar peso con fondo blanco para mejor visibilidad
+                mx = (sx + ex) / 2 + (-math.sin(ang)*12 if g.dirigido and g.matriz[j][i] else 0)
+                my = (sy + ey) / 2 + (math.cos(ang)*12 if g.dirigido and g.matriz[j][i] else 0)
                 w_val = g.matriz[i][j]
-                cv.create_text(mx, my, text=str(w_val),
-                               fill=col, font=FN,
-                               tags="peso")
+                peso_txt = str(int(w_val) if w_val == int(w_val) else w_val)
+                
+                # Fondo blanco para el peso
+                bbox = cv.create_text(mx, my, text=peso_txt, fill=col, font=FW,
+                                     tags="peso_temp")
+                bbox_coords = cv.bbox(bbox)
+                if bbox_coords:
+                    x0, y0, x1, y1 = bbox_coords
+                    # Crear rectángulo de fondo con margen
+                    cv.create_rectangle(x0-3, y0-2, x1+3, y1+2,
+                                       fill="white", outline=col, width=1)
+                    cv.tag_raise(bbox)
 
+        # Dibujar nodos encima
         for i, (x, y) in enumerate(pos):
             cv.create_oval(x-R, y-R, x+R, y+R,
                            fill=ACENTO, outline="white", width=2)
@@ -363,6 +415,7 @@ class App(tk.Tk):
         if not self.grafo: return
         g   = self.grafo
         nms = g.nombres_vertices()
+        algo = self.algoritmo_var.get()  # NUEVO
 
         # Índices origen / destino seleccionados
         try:
@@ -375,12 +428,19 @@ class App(tk.Tk):
                  if idx_origen != idx_destino else None
         ciclo  = g.encontrar_ciclo()
 
-        # Dijkstra
-        d_camino, d_costo = g.dijkstra(idx_origen, idx_destino)
-        # Bellman-Ford
-        b_camino, b_costo, b_neg = g.bellman_ford(idx_origen, idx_destino)
+        # MODIFICADO: Usar algoritmo seleccionado
+        if algo == "Dijkstra":
+            d_camino, d_costo = g.dijkstra(idx_origen, idx_destino)
+            b_camino, b_costo, b_neg = None, None, False
+            ruta_txt = "Dijkstra"
+            ruta_col = VERDE
+        else:  # Bellman-Ford
+            d_camino, d_costo = None, None
+            b_camino, b_costo, b_neg = g.bellman_ford(idx_origen, idx_destino)
+            ruta_txt = "Bellman-Ford"
+            ruta_col = NARANJA
 
-        # La ruta óptima a resaltar en el grafo (Dijkstra tiene prioridad)
+        # La ruta óptima a resaltar en el grafo
         self.ruta_opt_nodos = d_camino if d_camino else (b_camino or [])
         self.camino_nodos   = camino or []
         self.ciclo_nodos    = ciclo  or []
@@ -412,7 +472,7 @@ class App(tk.Tk):
         mat = encabezado + "\n"
         for i, nm in enumerate(nms):
             fila_texto = nm.ljust(5)
-            valores = "".join(str(g.matriz[i][k]).ljust(6) for k in range(g.n))
+            valores = "".join(str(int(g.matriz[i][k]) if g.matriz[i][k] == int(g.matriz[i][k]) else g.matriz[i][k]).ljust(6) for k in range(g.n))
             mat += fila_texto + valores + "\n"
         self._bloque(res, "Matriz de adyacencia", mat.rstrip(), ACENTO)
 
@@ -443,23 +503,24 @@ class App(tk.Tk):
                  if ciclo else "Sin ciclos detectados")
         self._bloque(res, "Ciclo", z_txt, ROJO)
 
-        # --- Dijkstra ---
-        if d_camino:
-            d_txt = " -> ".join(d_camino) + f"\ncosto total: {d_costo}"
-        else:
-            d_txt = f"Sin camino entre {nms[idx_origen]} y {nms[idx_destino]}"
-        self._bloque(res, f"Dijkstra  ({nms[idx_origen]} -> {nms[idx_destino]})",
-                     d_txt, VERDE)
+        # --- Ruta Óptima (Dijkstra o Bellman-Ford según selección) ---
+        if algo == "Dijkstra":
+            if d_camino:
+                ruta_txt_res = " -> ".join(d_camino) + f"\ncosto total: {d_costo}"
+            else:
+                ruta_txt_res = f"Sin camino entre {nms[idx_origen]} y {nms[idx_destino]}"
+            self._bloque(res, f"Dijkstra  ({nms[idx_origen]} -> {nms[idx_destino]})",
+                         ruta_txt_res, VERDE)
+        else:  # Bellman-Ford
+            if b_neg:
+                ruta_txt_res = "⚠️ Ciclo de peso negativo detectado"
+            elif b_camino:
+                ruta_txt_res = " -> ".join(b_camino) + f"\ncosto total: {b_costo}"
+            else:
+                ruta_txt_res = f"Sin camino entre {nms[idx_origen]} y {nms[idx_destino]}"
+            self._bloque(res, f"Bellman-Ford  ({nms[idx_origen]} -> {nms[idx_destino]})",
+                         ruta_txt_res, NARANJA)
 
-        # --- Bellman-Ford ---
-        if b_neg:
-            b_txt = "⚠ Ciclo de peso negativo detectado"
-        elif b_camino:
-            b_txt = " -> ".join(b_camino) + f"\ncosto total: {b_costo}"
-        else:
-            b_txt = f"Sin camino entre {nms[idx_origen]} y {nms[idx_destino]}"
-        self._bloque(res, f"Bellman-Ford  ({nms[idx_origen]} -> {nms[idx_destino]})",
-                     b_txt, NARANJA)
 
     # ------------------------------------------------------------------
     def _clear_res(self):
